@@ -18,21 +18,31 @@ def download_data():
         .format(first_user, last_user, threshold, date.today().strftime('%Y-%m-%d'))
 
     save_file = open(default_filename if not filename else filename, 'w')
+    save_file_csv = csv.writer(save_file, dialect='kong-leaderboards')
 
     def callback(user):
         """
         Write user in .csv format
         """
-        user_vars = user['user_vars']
+        user_vars = user.get('user_vars', None)
+
+        if user_vars is None:
+            print("Error with {}".format(user))
+            return
 
         if user_vars['points'] > threshold:
-            user_row = '{},{},{},{}\n'.format(user['user_id'], user_vars['username'], user_vars['level'],
-                                              user_vars['points'])
-            save_file.write(user_row)
+            save_file_csv.writerow([
+                user['user_id'],
+                user_vars['username'],
+                user_vars['level'],
+                user_vars['points'],
+            ])
 
     k = KongregateData(first_user, last_user)
     t = time.time()
     k.run(connections, callback)
+
+    save_file.close()
     print('Time elapsed: {}'.format(time.time() - t))
 
 
@@ -48,20 +58,8 @@ def get_position_changes():
 
 
 def get_position_changes_with_files(old_file, new_file, rank_file):
-    csv.register_dialect('kong-leaderboards', delimiter=',', quoting=csv.QUOTE_NONE)
     old_file_reader = csv.reader(old_file, dialect='kong-leaderboards')
     new_file_reader = csv.reader(new_file, dialect='kong-leaderboards')
-
-    new_users = []
-    for line in new_file_reader:
-        try:
-            user_id = int(line[0])
-            points = int(line[3])
-            new_users.append((user_id, points))
-        except csv.Error as e:
-            sys.exit('File %s, line %d: $s'.format(new_file.name, new_file_reader.line_num, e))
-
-    new_users = [x[0] for x in sorted(new_users, key=itemgetter(1, 0))]
 
     old_users = []
     for line in old_file_reader:
@@ -72,23 +70,38 @@ def get_position_changes_with_files(old_file, new_file, rank_file):
         except csv.Error as e:
             sys.exit('File %s, line %d: $s'.format(old_file.name, old_file_reader.line_num, e))
 
-    old_users = [x[0] for x in sorted(old_users, key=itemgetter(1, 0))]
+    old_ids = [x[0] for x in sorted(old_users, key=itemgetter(1, 0))]
+    old_ids.reverse()
 
-    print(new_users)
-    print(old_users)
+    new_users = []
+    for line in new_file_reader:
+        try:
+            user_id = int(line[0])
+            points = int(line[3])
+            new_users.append((user_id, points))
+        except csv.Error as e:
+            sys.exit('File %s, line %d: $s'.format(new_file.name, new_file_reader.line_num, e))
+
+    new_ids = [x[0] for x in sorted(new_users, key=itemgetter(1, 0))]
+    new_ids.reverse()
 
     position_change_file = csv.writer(rank_file)
-    total_users = len(new_users)
-    for new_pos in range(0, len(new_users)):
-        user_id = new_users[new_pos]
-        old_pos = bisect_left(old_users, user_id)
+    for new_pos in range(0, len(new_ids)):
+        user_id = new_ids[new_pos]
 
-        if old_pos != len(old_users) and old_users[old_pos] == user_id:
-            position_change_file.writerow([user_id, total_users - (new_pos - old_pos) + 1])
-        position_change_file.writerow([user_id, 'NEW'])
+        if user_id in old_ids:
+            old_pos = old_ids.index(user_id)
+            old_id = old_ids[old_pos]
+
+            if old_pos != len(old_ids) and old_id == user_id:
+                position_change_file.writerow([old_pos - new_pos])
+        else:
+            position_change_file.writerow(['NEW'])
 
 
 def main():
+    csv.register_dialect('kong-leaderboards', delimiter=',', quoting=csv.QUOTE_NONE)
+
     option = 0
     while True:
         try:
